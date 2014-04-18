@@ -1,0 +1,296 @@
+<?php 
+	/******************************************
+	* Function    : subscriptions_delete();
+	* Description : Delete the subscription on stripe no more recurring billing  
+	* Author 	  : devender Kumar
+	* Twitter 	  : @kantsverma
+	******************************************/	
+	// First your need to downalod the stripe lib from the stripe official site then upload that in your project direcroty
+	// and add include the library file like below in class make sure path will be correct 
+	
+include(APPPATH.'libraries/stripe_new/lib/Stripe.php');
+ 
+if ( ! defined('BASEPATH')) exit('No direct script access allowed');
+
+class Stripe {
+
+
+	private $Apikey;
+	
+    function __construct(){
+
+		parent::__construct();
+		// for test purpose		
+		$this->Apikey = Stripe::setApiKey("sk_test_uelzkn6bJeWwucEFeuaCnm90");
+		
+   }
+
+	/******************************************
+	* Function    : update_subscription_plan();
+	* Description : This is used to upgrade or change the subscription plan on stripe
+	* Author 	  : devender 
+	* Twitter 	  : @kantsverma
+	******************************************/	
+	
+	function update_subscription_plan()
+	{		
+	
+	
+		$result['errors'] = '';
+		$result['success'] = false;
+		
+		// check the previous plan of users by its id 
+		//print_r($this->session->userdata('subscription_id'));
+		
+		// previous plan id 
+		$lastPlan = '2month_plan';
+		
+		
+		if($lastPlan != $_POST('monthly_plan') ){
+		
+			// get the last date of previous plan and set it to this variable is should be strtotime 
+			$lastDate  = '';
+			
+			// compare with the stripe plan id with type of plan is previous 
+			if($_POST['plan'] == 3){
+				$trial_end = strtotime(date("Y-m-d", strtotime(date("Y-m-d", $lastDate))) . " +6 month");
+			}elseif($_POST['plan'] == 2){
+				$trial_end = strtotime(date("Y-m-d", strtotime(date("Y-m-d", $lastDate))) . " +3 month");
+			}else{
+				$trial_end = strtotime(date("Y-m-d", strtotime(date("Y-m-d", $lastDate))) . " +1 month");
+			}
+			
+			$subscription_data = array( 
+				'id'=>$this->session->userdata('subscription_id'),
+				'plan_id'=>$this->input->post('monthly_plan'),
+				'customer_id'=>$this->session->userdata('customer_id'),
+				'trial_end'=>$trial_end
+			);
+			
+			$c = Stripe_Customer::retrieve($_POST['customer_id']);
+			
+			if($c){
+				// updat ethe plan of users 
+				try {
+					//print_r($this->input->post('monthly_plan'));
+					
+					$plan = Stripe_Plan::retrieve($this->input->post('monthly_plan'));
+					
+					if($plan->id){
+						$planId = $plan->id;
+					}else{
+						$planId = $_POST('monthly_plan');
+					}
+					
+					if($planId == 3){
+						$planType = '6 month';
+					}elseif($planId == 2){
+						$planType = '3 month';
+					}else{
+						$planType = '1 month';
+					}
+					// update the subscription on stripe 
+					$c->updateSubscription(array("plan" => $planId, "prorate" => false ));
+					
+					// update here in database latest plan 
+					//$this->model_account->update_subscription($subscription_data);
+					$result['success'] = 'Thank you for changing your subscription, you are now on the '.$planType.'-month plan!';
+			
+				}catch (Exception $e) {
+					$result['success'] = $e->getMessage();
+				}
+				
+			}else{
+				$result['success'] = 'Sorry !There is some problem with customer id please try again later';
+			}
+		}else{
+			$result['success'] = 'Sorry ! you have already this plan please select another';
+		}
+			
+		  echo json_encode($result);
+
+	}
+	
+
+	/******************************************
+	* Function    : subscriptions_delete();
+	* Description : Delete the subscription on stripe no more recurring billing  
+	* Author 	  : devender 
+	* Twitter 	  : @kantsverma
+	******************************************/	
+
+	function subscriptions_delete()
+	{
+		if(@$_POST['customer_id']){
+			try {
+			// get customer from stripe using customer ID
+			$cu = Stripe_Customer::retrieve($_POST['customer_id']);
+			// set cancelled his subscription on period end on recent subscription
+			$cancel = $cu->cancelSubscription(array('at_period_end' => true));
+			
+				if($cancel->id){
+					$result['success'] = 1;				
+				}else{
+					$result['error'] = 'Failed to cancel subscription';				
+				}
+				
+			}catch (Exception $e) {
+				$result['error'] = $e->getMessage();
+			}
+		}else{
+			$result['error'] = 'Not found any Subscriber id';
+		}
+		echo json_encode($result);
+	}
+	
+	/******************************************
+	* Function    : update_payment();
+	* Description : Update payment on stripe 
+	* Author 	  : devender 
+	* Twitter 	  : @kantsverma
+	******************************************/
+
+ 	function update_payment()
+	{
+
+			$_POST['customer_id'];
+			try {
+				// get customer from stripe using customer ID
+				$cu = Stripe_Customer::retrieve($_POST['customer_id']);
+				
+				$cu->card = array('number'=>$_POST['id_cardnumber'],
+								'exp_month'=>$_POST['id_month'],
+								'exp_year'=>$_POST['id_year'],
+								'cvc'=>$_POST['id_cvv'],
+								'name'=>$_POST['id_firstname'].' '.$_POST['id_lastname'],
+								'address_line1'=>$_POST['id_address1'],
+								'address_line2'=>$_POST['id_apt'],
+								'address_zip'=>$_POST['id_zip'],
+								'address_state'=>$_POST['id_state'],
+								'address_city'=>$_POST['id_city'],
+								'address_country'=>$_POST['country']
+					);
+
+				$cu->save();
+			} catch (Exception $e) {
+				$result['success'] = $e->getMessage();
+			}
+
+	}
+
+	/******************************************
+	* Function    : create_new_subscription();
+	* Description : Creaqting new subscription on stripe 
+	* Author 	  : devender 
+	* Twitter 	  : @kantsverma
+	******************************************/
+	
+	function create_new_subscription(){
+		 	
+		$result['errors'] = array();
+		$result['success'] = false;
+		
+			// stripe payment go here 
+			$_POST['recurring']					= 'yes';
+			$using_discount = false;
+			$payment = '';
+			try {
+				// create a token to access the data from stripe 
+				$tokens = Stripe_Token::create(array(
+					"card" => 
+							array(
+								'number'			=>	$_POST['card_number'],
+								'exp_month'			=>	$_POST['month'],
+								'exp_year'			=>	$_POST['year'],
+								'cvc'				=>	$_POST['cvv'],
+								'name'				=>	$_POST['firstname'].' '.$_POST['lastname'],
+								'address_line1'		=>	$_POST['address'],
+								'address_line2'		=>	$_POST['apt'],
+								'address_zip'		=>	$_POST['postal_code'],
+								'address_state'		=>	$_POST['state'],
+								'address_country'	=>	$_POST['country']
+								)
+					)
+				);
+				$token = $tokens->id;
+				$plan_id = strip_tags(trim(($_POST['package_id'])?$_POST['package_id']:'1'));
+				
+					// check if there is any coupon used by customer 
+					if($this->input->post('coupon_code')){
+						$customerArr = Stripe_Customer::create(array(
+						  "card" => $token,
+						  "plan" => $plan_id,
+						  "description" => strip_tags($_POST['email']),
+						  "coupon" => strip_tags($this->input->post('coupon_code'))
+						  )
+						);
+					}else{
+						$customerArr = Stripe_Customer::create(array(
+						  "card" => $token,
+						  "plan" => $plan_id,
+						  "description" => strip_tags($_POST['email'])
+						  )
+						);
+					}
+					// check customr create or not 
+					
+					if($customerArr->id){
+					
+						//// Save All Information in DataBase
+						$id = $this->session->userdata('login_id');
+						
+						////insert information in subscriptions table
+						// Perform here  the databse entry 
+					
+						$result['success'] = 1;
+					}else{
+						$result['success'] = 0;
+					}
+				
+			} catch (Exception $e) {
+				$result['success'] = $e->getMessage();
+			}
+		
+		echo json_encode($result);
+	
+	}
+	
+
+	/******************************************
+	* Function    : validate_coupon();
+	* Description : check valid coupon from stripe  
+	* Author 	  : devender 
+	* Twitter 	  : @kantsverma
+	******************************************/
+   function validate_coupon()
+   {
+
+		$res='';           
+		$using_discount = false;
+		$coupon_code = $_POST('coupon_code');
+		if(isset($coupon_code) && strlen(trim($coupon_code)) > 0) {
+
+			$_POST['recurring']	= 'yes';
+			$using_discount = true;
+
+			// we have a discount code, now check that it is valid			
+			try {
+				$coupon = Stripe_Coupon::retrieve( trim( $_POST('coupon_code') ) );
+				// if we got here, the coupon is valid
+			} catch (Exception $e) {
+				// an exception was caught, so the code is invalid
+				$error = "The coupon code you entered is invalid. Please click back and enter a valid code, or leave it blank for no discount.";
+				$res = 'notmatched';
+			}
+			
+		}else{
+
+		   $res = 'matched';
+
+		}
+		
+		return $res;
+	
+	}
+
+}
