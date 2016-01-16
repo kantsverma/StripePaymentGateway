@@ -1,0 +1,151 @@
+<?php
+
+/**
+ * Project: ABC
+ * Author : kantsverma
+ * Creation Date : 16 Jan 2016
+ * Description : File Contains Controller Class for Stripe webhooks in cakephp  
+ * 
+ */
+class StripeController extends AppController
+{
+
+	var $name = 'Stripe';
+	var $uses = array();
+	
+ 	function beforeFilter() {
+        $this->Auth->allow('index');
+        parent::beforeFilter();		
+    } 
+
+	/**
+	 * Description : To get the stripe event webhooks url and fire email based on stripe response 
+	 * Created on : 19 Dec 2015
+	 * Author : kantsverma
+	 */
+	function index()
+	{
+		
+		App::import('Vendor', 'stripe', array('file' => 'Stripe.php'));
+		Stripe::setApiKey(STRIPE_SECERT_KEY);
+		
+		$errorMessage = '';		
+		if($_REQUEST['listner'] == 'intelishare'){
+			// retrieve the request's body and parse it as JSON
+			$body = @file_get_contents('php://input');
+			// grab the event information
+			$event_json = json_decode($body);
+
+			if(isset($event_json->id)) {
+				// this will be used to retrieve the event from Stripe
+				$event_id = $event_json->id;	
+				try {
+					
+					// to verify this is a real event, we re-retrieve the event from Stripe 
+					$event = Stripe_Event::retrieve($event_id);
+					$invoice = $event->data->object;
+					
+					// successful payment
+					if($event->type == 'charge.succeeded') {
+						// send a payment receipt email here
+						
+						// retrieve the payer's information
+						$customer = Stripe_Customer::retrieve($invoice->customer);
+						$email = $customer->email;
+						$customer_name = $customer->cards['data']['0']->name;
+						
+						$amount = $invoice->amount / 100; // amount comes in as amount in cents, so we need to convert to dollars
+						$subject = 'Payment Receipt Intelishare';
+						$from = $customer->email;
+						$message = '<table width="600px" align="center" style="background:#fff; border:1px solid #dadada; border-radius:5px" bgcolor="#fff" border="0" cellspacing="0" cellpadding="0">
+						<tr><td width="30%">User Name : </td><td>'.$customer_name.'</td></tr>
+						<tr><td width="30%">User Email :</td><td> '.$from.'</td></tr>
+						<tr><td width="30%">Message :</td><td> A new users have successfully subscribed on Intelishare with payment of $ ' . $amount . '</td></tr>            
+						</table>';
+
+						$this->send_stripe_mail($from, $customer_name, $subject, $message);
+						$errorMessage = 'Payment Success Intelishare';			
+					}
+					
+					// failed payment
+					if($event->type == 'charge.failed') {
+						// send a failed payment notice email here
+						
+						// retrieve the payer's information
+						$customer = Stripe_Customer::retrieve($invoice->customer);
+						$email = $customer->email;
+						$customer_name = $customer->cards['data']['0']->name;											
+						$subject = 'Failed Intelishare Payment';
+						$from = $customer->email;
+						$message = '<table width="600px" align="center" style="background:#fff; border:1px solid #dadada; border-radius:5px" bgcolor="#fff" border="0" cellspacing="0" cellpadding="0">
+						<tr><td width="30%">User Name : </td><td>'.$customer_name.'</td></tr>
+						<tr><td width="30%">User Email :</td><td> '.$from.'</td></tr>
+						<tr><td width="30%">Message :</td><td> A new users try to subscribe but his subscription of $ ' . $amount . '  failed due to some reason Please check and contact to customers. </td></tr>
+						</table>';
+
+						$this->send_stripe_mail($from, $customer_name, $subject, $message);
+						$errorMessage = 'Payment Failed Intelishare';
+					}
+					
+				} catch (Exception $e) {
+					// something failed, perhaps log a notice or email the site admin
+					$subject = 'Failed Intelishare Payment';
+					$from = 'help@intelishare.com';
+					$message = '<table width="600px" align="center" style="background:#fff; border:1px solid #dadada; border-radius:5px" bgcolor="#fff" border="0" cellspacing="0" cellpadding="0">
+					<tr><td width="30%">User Name : </td><td></td></tr>
+					<tr><td width="30%">User Email :</td><td> </td></tr>
+					<tr><td width="30%">Message :</td><td> Sorry ! someone try to subscribe on Intelishare but failed to process on due to ' . $e->getMessage() . '. Please check the stripe and get in touch with customer</td></tr>
+					</table>';
+					$this->send_stripe_mail($from, '', $subject, $message);
+					$errorMessage = 'Payment Failed Exception Intelishare';						
+				}
+			}
+			/* else{
+				// something failed, perhaps log a notice or email the site admin
+				$subject = 'Failed Intelishare Payment';
+				$from = 'help@intelishare.com';
+				$message = '<table width="600px" align="center" style="background:#fff; border:1px solid #dadada; border-radius:5px" bgcolor="#fff" border="0" cellspacing="0" cellpadding="0">
+				<tr><td width="30%">User Name : </td><td></td></tr>
+				<tr><td width="30%">User Email :</td><td> </td></tr>
+				<tr><td width="30%">Message :</td><td> Sorry ! your subscriptions failed to process on Intelishare due to no event generated from stripe</td></tr>
+				</table>';
+				$this->send_stripe_mail($from, '', $subject, $message);
+				$errorMessage = 'Payment Failed outside Intelishare';
+			} */
+		}
+		echo $errorMessage;
+		die();
+	}
+	
+	function send_stripe_mail($from_email,$from_name,$subject,$message){    
+		// set message for email template 
+        $this->layout = '';		
+		$this->set('stripe_message', $message);
+		
+		$view = new View($this, true);
+		$emailbody = $view->render('/elements/email/html/stripe_notification');
+		$body_html = $emailbody;
+		$mailArray = array(
+			'to' => array(
+				'0' => array('email' => 'devender.kumar@drishinfo.com',)
+			),
+			'from' => $from_email,
+			'fromname' => $from_name,
+			'subject' => $subject,
+			'html' => $body_html,
+			'text' => $body_text,
+			'replyto' => REPLY_TO,
+		);	
+		//$this->layout = $layout;
+		$response = $this->sgSendMail($mailArray);
+		// check response of email 
+		$jsonresponse = json_decode($response);
+		
+		if ($jsonresponse->message == "success") {
+			return true;
+		} else {
+			return false;
+		}
+	}
+
+}
