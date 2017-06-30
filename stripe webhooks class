@@ -127,7 +127,7 @@ class StripeController extends AppController
 		$body_html = $emailbody;
 		$mailArray = array(
 			'to' => array(
-				'0' => array('email' => 'devender.kumar@drishinfo.com',)
+				'0' => array('email' => 'abc@example.com',)
 			),
 			'from' => $from_email,
 			'fromname' => $from_name,
